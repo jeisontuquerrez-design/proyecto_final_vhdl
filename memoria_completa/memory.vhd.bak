@@ -1,10 +1,3 @@
--------------------------------------------------------------------------------
--- Entity: memory
--- Architecture: memory_arch
--- Description: 8-bit memory system with program memory, data memory, 
---              and I/O ports for the 8-bit computer system
--------------------------------------------------------------------------------
-
 library IEEE;
 use IEEE.std_logic_1164.all;
 use IEEE.numeric_std.all;
@@ -14,383 +7,134 @@ entity memory is
         clock       : in  std_logic;
         reset       : in  std_logic;
         address     : in  std_logic_vector(7 downto 0);
-        write       : in  std_logic;
         datain      : in  std_logic_vector(7 downto 0);
+        write       : in  std_logic;
+        port_in_00  : in std_logic_vector(7 downto 0);  -- Un solo puerto de entrada
+        port_out_00 : out std_logic_vector(7 downto 0); -- Un solo puerto de salida (conecta a LEDs)
         dataout     : out std_logic_vector(7 downto 0);
-        
-        -- Input ports (0xF0-0xFF)
-        port_in_00  : in  std_logic_vector(7 downto 0);
-        port_in_01  : in  std_logic_vector(7 downto 0);
-        port_in_02  : in  std_logic_vector(7 downto 0);
-        port_in_03  : in  std_logic_vector(7 downto 0);
-        port_in_04  : in  std_logic_vector(7 downto 0);
-        port_in_05  : in  std_logic_vector(7 downto 0);
-        port_in_06  : in  std_logic_vector(7 downto 0);
-        port_in_07  : in  std_logic_vector(7 downto 0);
-        port_in_08  : in  std_logic_vector(7 downto 0);
-        port_in_09  : in  std_logic_vector(7 downto 0);
-        port_in_10  : in  std_logic_vector(7 downto 0);
-        port_in_11  : in  std_logic_vector(7 downto 0);
-        port_in_12  : in  std_logic_vector(7 downto 0);
-        port_in_13  : in  std_logic_vector(7 downto 0);
-        port_in_14  : in  std_logic_vector(7 downto 0);
-        port_in_15  : in  std_logic_vector(7 downto 0);
-        
-        -- Output ports (0xE0-0xEF)
-        port_out_00 : out std_logic_vector(7 downto 0);
-        port_out_01 : out std_logic_vector(7 downto 0);
-        port_out_02 : out std_logic_vector(7 downto 0);
-        port_out_03 : out std_logic_vector(7 downto 0);
-        port_out_04 : out std_logic_vector(7 downto 0);
-        port_out_05 : out std_logic_vector(7 downto 0);
-        port_out_06 : out std_logic_vector(7 downto 0);
-        port_out_07 : out std_logic_vector(7 downto 0);
-        port_out_08 : out std_logic_vector(7 downto 0);
-        port_out_09 : out std_logic_vector(7 downto 0);
-        port_out_10 : out std_logic_vector(7 downto 0);
-        port_out_11 : out std_logic_vector(7 downto 0);
-        port_out_12 : out std_logic_vector(7 downto 0);
-        port_out_13 : out std_logic_vector(7 downto 0);
-        port_out_14 : out std_logic_vector(7 downto 0);
-        port_out_15 : out std_logic_vector(7 downto 0)
+
+        hex0        : out std_logic_vector(6 downto 0);
+        hex1        : out std_logic_vector(6 downto 0);
+        hex2        : out std_logic_vector(6 downto 0);
+        hex3        : out std_logic_vector(6 downto 0)
     );
 end entity;
 
 architecture memory_arch of memory is
 
-    -------------------------------------------------------------------------
-    -- INSTRUCTION MNEMONICS (Opcodes)
-    -------------------------------------------------------------------------
-    constant LDA_IMM : std_logic_vector(7 downto 0) := x"86";
-    constant LDA_DIR : std_logic_vector(7 downto 0) := x"87";
-    constant LDB_IMM : std_logic_vector(7 downto 0) := x"88";
-    constant LDB_DIR : std_logic_vector(7 downto 0) := x"89";
-    constant STA_DIR : std_logic_vector(7 downto 0) := x"96";
-    constant STB_DIR : std_logic_vector(7 downto 0) := x"97";
-    constant ADD_AB  : std_logic_vector(7 downto 0) := x"42";
-    constant SUB_AB  : std_logic_vector(7 downto 0) := x"43";
-    constant AND_AB  : std_logic_vector(7 downto 0) := x"44";
-    constant OR_AB   : std_logic_vector(7 downto 0) := x"45";
-    constant INCA    : std_logic_vector(7 downto 0) := x"46";
-    constant INCB    : std_logic_vector(7 downto 0) := x"47";
-    constant DECA    : std_logic_vector(7 downto 0) := x"48";
-    constant DECB    : std_logic_vector(7 downto 0) := x"49";
-    constant BRA     : std_logic_vector(7 downto 0) := x"20";
-    constant BMI     : std_logic_vector(7 downto 0) := x"21";
-    constant BPL     : std_logic_vector(7 downto 0) := x"22";
-    constant BEQ     : std_logic_vector(7 downto 0) := x"23";
-    constant BNE     : std_logic_vector(7 downto 0) := x"24";
-    constant BVS     : std_logic_vector(7 downto 0) := x"25";
-    constant BVC     : std_logic_vector(7 downto 0) := x"26";
-    constant BCS     : std_logic_vector(7 downto 0) := x"27";
-    constant BCC     : std_logic_vector(7 downto 0) := x"28";
+    -- Declaración de componentes
+    component rom_128x8_sync is
+        port (
+            clock   : in  std_logic;
+            address : in  integer range 0 to 255;
+            dataout : out std_logic_vector(7 downto 0)
+        );
+    end component;
 
-    -------------------------------------------------------------------------
-    -- PROGRAM MEMORY (ROM) - Addresses 0x00 to 0x7F (128 bytes)
-    -------------------------------------------------------------------------
-    type rom_type is array (0 to 127) of std_logic_vector(7 downto 0);
-    
-    constant ROM : rom_type := (
-        0  => LDA_IMM,
-        1  => x"AA",
-        2  => STA_DIR,
-        3  => x"E0",
-        4  => BRA,
-        5  => x"00",
-        others => x"00"
-    );
-    
-    signal rom_dataout : std_logic_vector(7 downto 0);
-    signal EN_ROM      : std_logic;
+    component rw_96x8_sync is
+        port (
+            clock       : in  std_logic;
+            reset       : in  std_logic;
+            address_int : in  integer range 0 to 255;
+            datain      : in  std_logic_vector(7 downto 0);
+            write       : in  std_logic;
+            dataout     : out std_logic_vector(7 downto 0)
+        );
+    end component;
 
-    -------------------------------------------------------------------------
-    -- DATA MEMORY (RAM) - Addresses 0x80 to 0xDF (96 bytes)
-    -------------------------------------------------------------------------
-    type rw_type is array (128 to 223) of std_logic_vector(7 downto 0);
-    signal RW          : rw_type;
-    signal rw_dataout  : std_logic_vector(7 downto 0);
-    signal EN_RW       : std_logic;
+    -- HEX decodificador de 4 bits, activo bajo
+    function hex_to_7seg(hex: std_logic_vector(3 downto 0)) return std_logic_vector is
+        variable segs : std_logic_vector(6 downto 0);
+    begin
+        case hex is
+            when "0000" => segs := "1000000"; -- 0
+            when "0001" => segs := "1111001"; -- 1
+            when "0010" => segs := "0100100"; -- 2
+            when "0011" => segs := "0110000"; -- 3
+            when "0100" => segs := "0011001"; -- 4
+            when "0101" => segs := "0010010"; -- 5
+            when "0110" => segs := "0000010"; -- 6
+            when "0111" => segs := "1111000"; -- 7
+            when "1000" => segs := "0000000"; -- 8
+            when "1001" => segs := "0010000"; -- 9
+            when "1010" => segs := "0001000"; -- A
+            when "1011" => segs := "0000011"; -- b
+            when "1100" => segs := "1000110"; -- C
+            when "1101" => segs := "0100001"; -- d
+            when "1110" => segs := "0000110"; -- E
+            when "1111" => segs := "0001110"; -- F
+            when others => segs := "1111111"; -- blank
+        end case;
+        return segs;
+    end function;
+
+    signal rom_dataout      : std_logic_vector(7 downto 0);
+    signal rw_dataout       : std_logic_vector(7 downto 0);
+    signal dataout_internal : std_logic_vector(7 downto 0);
+    signal address_int      : integer range 0 to 255;
+
+    -- Registro para puerto de salida (conectado a LEDs)
+    signal reg_port_out_00  : std_logic_vector(7 downto 0);
 
 begin
 
-    -------------------------------------------------------------------------
-    -- PROGRAM MEMORY (ROM) LOGIC
-    -------------------------------------------------------------------------
-    enable_rom_process : process(address)
-    begin
-        if (to_integer(unsigned(address)) >= 0 and 
-            to_integer(unsigned(address)) <= 127) then
-            EN_ROM <= '1';
-        else
-            EN_ROM <= '0';
-        end if;
-    end process;
+    address_int <= to_integer(unsigned(address));
 
-    rom_process : process(clock)
-    begin
-        if rising_edge(clock) then
-            if EN_ROM = '1' then
-                rom_dataout <= ROM(to_integer(unsigned(address)));
-            end if;
-        end if;
-    end process;
+    -- Instancia de ROM 
+    u_rom : rom_128x8_sync
+        port map (
+            clock   => clock,
+            address => address_int,
+            dataout => rom_dataout
+        );
 
-    -------------------------------------------------------------------------
-    -- DATA MEMORY (RAM) LOGIC
-    -------------------------------------------------------------------------
-    enable_rw_process : process(address)
-    begin
-        if (to_integer(unsigned(address)) >= 128 and 
-            to_integer(unsigned(address)) <= 223) then
-            EN_RW <= '1';
-        else
-            EN_RW <= '0';
-        end if;
-    end process;
+    -- Instancia de RAM 
+    u_ram : rw_96x8_sync
+        port map (
+            clock       => clock,
+            reset       => reset,
+            address_int => address_int,
+            datain      => datain,
+            write       => write,
+            dataout     => rw_dataout
+        );
 
-    rw_process : process(clock)
+    -- Proceso para puerto de salida (LEDs) en dirección 0xE0
+    process(clock, reset)
     begin
-        if rising_edge(clock) then
-            if EN_RW = '1' and write = '1' then
-                RW(to_integer(unsigned(address))) <= datain;
-            elsif EN_RW = '1' and write = '0' then
-                rw_dataout <= RW(to_integer(unsigned(address)));
-            end if;
-        end if;
-    end process;
-
-    -------------------------------------------------------------------------
-    -- OUTPUT PORTS (0xE0 to 0xEF) - 16 output ports
-    -------------------------------------------------------------------------
-    port_out_00_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_00 <= x"00";
+        if reset = '1' then
+            reg_port_out_00 <= (others => '0');
         elsif rising_edge(clock) then
             if address = x"E0" and write = '1' then
-                port_out_00 <= datain;
+                reg_port_out_00 <= datain;
             end if;
         end if;
     end process;
 
-    port_out_01_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_01 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E1" and write = '1' then
-                port_out_01 <= datain;
-            end if;
-        end if;
-    end process;
+    port_out_00 <= reg_port_out_00;
 
-    port_out_02_process : process(clock, reset)
+    -- Multiplexor principal para data_out 
+    process(address_int, rom_dataout, rw_dataout, reg_port_out_00, address)
     begin
-        if reset = '0' then
-            port_out_02 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E2" and write = '1' then
-                port_out_02 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_03_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_03 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E3" and write = '1' then
-                port_out_03 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_04_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_04 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E4" and write = '1' then
-                port_out_04 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_05_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_05 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E5" and write = '1' then
-                port_out_05 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_06_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_06 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E6" and write = '1' then
-                port_out_06 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_07_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_07 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E7" and write = '1' then
-                port_out_07 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_08_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_08 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E8" and write = '1' then
-                port_out_08 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_09_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_09 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"E9" and write = '1' then
-                port_out_09 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_10_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_10 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"EA" and write = '1' then
-                port_out_10 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_11_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_11 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"EB" and write = '1' then
-                port_out_11 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_12_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_12 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"EC" and write = '1' then
-                port_out_12 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_13_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_13 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"ED" and write = '1' then
-                port_out_13 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_14_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_14 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"EE" and write = '1' then
-                port_out_14 <= datain;
-            end if;
-        end if;
-    end process;
-
-    port_out_15_process : process(clock, reset)
-    begin
-        if reset = '0' then
-            port_out_15 <= x"00";
-        elsif rising_edge(clock) then
-            if address = x"EF" and write = '1' then
-                port_out_15 <= datain;
-            end if;
-        end if;
-    end process;
-
-    -------------------------------------------------------------------------
-    -- MEMORY DATA OUTPUT MULTIPLEXER
-    -------------------------------------------------------------------------
-    MUX1 : process(address, rom_dataout, rw_dataout, 
-                   port_in_00, port_in_01, port_in_02, port_in_03,
-                   port_in_04, port_in_05, port_in_06, port_in_07,
-                   port_in_08, port_in_09, port_in_10, port_in_11,
-                   port_in_12, port_in_13, port_in_14, port_in_15)
-    begin
-        if (to_integer(unsigned(address)) >= 0 and 
-            to_integer(unsigned(address)) <= 127) then
-            dataout <= rom_dataout;
-        
-        elsif (to_integer(unsigned(address)) >= 128 and 
-               to_integer(unsigned(address)) <= 223) then
-            dataout <= rw_dataout;
-        
-        elsif address = x"F0" then
-            dataout <= port_in_00;
-        elsif address = x"F1" then
-            dataout <= port_in_01;
-        elsif address = x"F2" then
-            dataout <= port_in_02;
-        elsif address = x"F3" then
-            dataout <= port_in_03;
-        elsif address = x"F4" then
-            dataout <= port_in_04;
-        elsif address = x"F5" then
-            dataout <= port_in_05;
-        elsif address = x"F6" then
-            dataout <= port_in_06;
-        elsif address = x"F7" then
-            dataout <= port_in_07;
-        elsif address = x"F8" then
-            dataout <= port_in_08;
-        elsif address = x"F9" then
-            dataout <= port_in_09;
-        elsif address = x"FA" then
-            dataout <= port_in_10;
-        elsif address = x"FB" then
-            dataout <= port_in_11;
-        elsif address = x"FC" then
-            dataout <= port_in_12;
-        elsif address = x"FD" then
-            dataout <= port_in_13;
-        elsif address = x"FE" then
-            dataout <= port_in_14;
-        elsif address = x"FF" then
-            dataout <= port_in_15;
-        
+        if address = x"F0" then
+            dataout_internal <= x"E0"; -- Puerto de entrada fijo 
+        elsif address_int <= 127 then
+            dataout_internal <= rom_dataout;            -- ROM
+        elsif address_int >= 128 and address_int <= 255 then
+            dataout_internal <= rw_dataout;             -- RAM
+        elsif address = x"E0" then
+            dataout_internal <= reg_port_out_00;        -- Puerto de salida (LEDs)
         else
-            dataout <= x"00";
+            dataout_internal <= (others => '0');
         end if;
     end process;
+
+    dataout <= dataout_internal;
+
+    -- 7-segment HEX displays
+    hex3 <= hex_to_7seg(address(7 downto 4));
+    hex2 <= hex_to_7seg(address(3 downto 0));
+    hex1 <= hex_to_7seg(dataout_internal(7 downto 4));
+    hex0 <= hex_to_7seg(dataout_internal(3 downto 0));
 
 end architecture;
